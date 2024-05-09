@@ -3,33 +3,36 @@ const express = require('express');
 const app = express();
 const path = require('path');
 const cors = require('cors');
-const corsOptions = require('./config/corsOptions');
 const mongoose = require('mongoose');
 const statesRouter = require('./routes/api/states');
 const rootRouter = require('./routes/root');
 const connectDB = require('./config/dbConn');
 const PORT = process.env.PORT || 3500;
 
-
-// Connect to MongoDB
 connectDB();
 
-// Middleware
-app.use(cors(corsOptions));
+app.use(cors())
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '/public')));
 
-// Routes
+app.use((req,res,next) => {
+    res.set('Cache-Control', 'no-store')
+    next()
+});
+
 app.get(/^\/$|\/index(\.html)?$/, (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'index.html'));
 });
 
-// Route to handle states requests
+app.get('/products/:id', function (req, res, next) {
+    res.json({msg: 'This is CORS-enabled for all origins!'})
+});
+ 
+
 app.use('/states', statesRouter);
 app.use('/', rootRouter);
 
-// 404 Error handling
 app.all('*', (req, res) => {
     res.status(404);
     if (req.accepts('html')) {
@@ -41,7 +44,6 @@ app.all('*', (req, res) => {
     }
 });
 
-// Start the server
 mongoose.connection.once('open', () => {
     console.log('Connected to MongoDB');
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
