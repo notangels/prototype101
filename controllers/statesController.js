@@ -1,221 +1,216 @@
 const State = require('../model/State');
 const statesData = require('../model/statesData.json');
 
+const getStateFullName = (stateCode) => {
+    const state = statesData.find(s => s.code === stateCode);
+    return state ? state.state : "Unknown State";
+};
 
 const getFunFact = async (req, res) => {
     if (!req.state || !req.state.funfacts || req.state.funfacts.length === 0) {
-        return res.status(404).json({ message: 'No fun facts found for this state' });
+        const stateCode = req.state ? req.state.stateCode : req.params.state.toUpperCase();
+        const stateDisplayName = getStateFullName(stateCode);
+        return res.status(404).json({ message: `No Fun Facts found for ${stateDisplayName}` });
     }
     const funFact = req.state.funfacts[Math.floor(Math.random() * req.state.funfacts.length)];
-    res.json({ state: req.state.stateCode, funFact: funFact });
+    res.json({ funfact: funFact });
 };
 
-// Function to add a fun fact to a state
+const updateFunFact = async (req, res) => {
+    const { state } = req.params;
+    const { index, funfact } = req.body;
+
+    if (index === undefined) {
+        return res.status(400).json({ error: 'State fun facts value required' });
+    }
+
+    if (funfact === undefined || typeof funfact !== 'string') {
+        return res.status(400).json({ error: 'State fun facts value required' });
+    }
+
+    const stateCode = state.toUpperCase();
+    const dbState = await State.findOne({ stateCode });
+
+    const stateDisplayName = getStateFullName(stateCode);
+
+    if (!dbState) {
+        return res.status(404).json({ error: `State not found for ${stateDisplayName}` });
+    }
+
+    if (!dbState.funfacts || dbState.funfacts.length === 0) {
+        return res.status(404).json({ error: `No Fun Facts found for ${stateDisplayName}` });
+    }
+
+    const adjustedIndex = parseInt(index, 10) - 1;
+    if (isNaN(adjustedIndex) || adjustedIndex < 0 || adjustedIndex >= dbState.funfacts.length) {
+        return res.status(404).json({ error: `No Fun Fact found at that index for ${stateDisplayName}` });
+    }
+
+    dbState.funfacts[adjustedIndex] = funfact;
+    await dbState.save();
+
+    res.json({
+        message: 'Fun fact updated successfully',
+        state: stateDisplayName, 
+        funfacts: dbState.funfacts,
+        totalFunFacts: dbState.funfacts.length
+    });
+};
+
+
+const deleteFunFact = async (req, res) => {
+    const { state } = req.params;
+    const { index } = req.body;
+
+    if (index === undefined) {
+        return res.status(400).json({ error: 'State fun fact index value required' });
+    }
+
+    const adjustedIndex = parseInt(index, 10) - 1;
+    if (isNaN(adjustedIndex) || adjustedIndex < 0) {
+        return res.status(400).json({ error: 'State fun fact index value required' });
+    }
+
+    try {
+        const stateCode = state.toUpperCase();
+        const dbState = await State.findOne({ stateCode: stateCode });
+        const stateDisplayName = getStateFullName(stateCode); 
+
+        if (!dbState || !dbState.funfacts) {
+            return res.status(404).json({ error: `No Fun Facts found for ${stateDisplayName}` });
+        }
+
+        if (adjustedIndex >= dbState.funfacts.length) {
+            return res.status(404).json({ error: `No Fun Fact found at that index for ${stateDisplayName}` });
+        }
+
+        dbState.funfacts.splice(adjustedIndex, 1);
+        await dbState.save();
+
+        res.json({
+            message: 'Fun fact deleted successfully',
+            state: stateDisplayName, 
+            funfacts: dbState.funfacts,
+            totalFunFacts: dbState.funfacts.length
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+
 const addFunFact = async (req, res) => {
     try {
         const { state } = req.params;
+
+        if (!req.body.hasOwnProperty('funfacts')) {
+            return res.status(400).json({ error: 'State fun facts value required' });
+        }
+
         const { funfacts } = req.body;
 
-        // Find the state in the database
-        let dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            // If state not found, create a new state entry
-            dbState = new State({ stateCode: state, funfacts });
-        } else {
-            // If state found, add the provided fun facts to the state
-            dbState.funfacts.push(...funfacts);
+        if (!Array.isArray(funfacts)) {
+            return res.status(400).json({ error: 'State fun facts value must be an array' });
         }
 
-        // Save the state to the database
+        let dbState = await State.findOne({ stateCode: state.toUpperCase() });
+        if (!dbState) {
+            return res.status(404).json({ error: `State not found for code ${state.toUpperCase()}, cannot add fun facts.` });
+        }
+
+        dbState.funfacts = dbState.funfacts.concat(funfacts);
         await dbState.save();
 
-        res.status(201).json({ message: 'Fun facts added successfully', state: dbState.stateCode, funfacts: dbState.funfacts });
+        res.status(201).json({
+            message: 'Fun facts added successfully',
+            state: dbState.stateCode,
+            funfacts: dbState.funfacts,
+            totalFunFacts: dbState.funfacts.length
+        });
     } catch (error) {
-        console.error(error);
+        console.error('Error adding fun facts:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
 
-// Function to update a fun fact for a state
-const updateFunFact = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const { index, funfact } = req.body;
-
-        // Find the state in the database
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        // Update the fun fact at the specified index
-        if (index < 1 || index > dbState.funfacts.length) {
-            return res.status(400).json({ error: 'Invalid index parameter' });
-        }
-
-        dbState.funfacts[index - 1] = funfact;
-        await dbState.save();
-
-        res.json({ message: 'Fun fact updated successfully', state: dbState.stateCode, funfacts: dbState.funfacts });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-};
-
-// Function to delete a fun fact from a state
-const deleteFunFact = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const { index } = req.body;
-
-        // Find the state in the database
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        // Remove the fun fact at the specified index
-        if (index < 1 || index > dbState.funfacts.length) {
-            return res.status(400).json({ error: 'Invalid index parameter' });
-        }
-
-        dbState.funfacts.splice(index - 1, 1);
-        await dbState.save();
-
-        res.json({ message: 'Fun fact deleted successfully', state: dbState.stateCode, funfacts: dbState.funfacts });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-};
-
-/* Function to get all states
 const getAllStates = async (req, res) => {
     try {
-        const dbStates = await State.find();
-
+        let query = {};
+        if (req.query.contig) {
+            const isContig = req.query.contig === 'true';
+            query.stateCode = isContig ? { $nin: ['AK', 'HI'] } : { $in: ['AK', 'HI'] };
+        }
+        const dbStates = await State.find(query);
         res.json(dbStates);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};*/
-const getAllStates = async (req, res) => {
-    try {
-        let query = {}; // Start with an empty query object which means no filters applied
-
-        // Check if the 'contig' query parameter is provided
-        if (req.query.contig) {
-            const isContig = req.query.contig === 'true';
-            // Apply filters based on whether 'contig' is true or false
-            if (isContig) {
-                query.stateCode = { $nin: ['AK', 'HI'] };  // Exclude Alaska and Hawaii for contiguous states
-            } else {
-                query.stateCode = { $in: ['AK', 'HI'] };   // Include only Alaska and Hawaii for non-contiguous states
-            }
-        }
-
-        // Perform the query with or without filters based on the presence of 'contig' parameter
-        const dbStates = await State.find(query);
-        res.json(dbStates); // Return the result as JSON
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' }); // Handle any errors
-    }
 };
 
-
-// Function to get state details
 const getState = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        res.json(dbState);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    if (!req.state) {
+        return res.status(404).json({ error: 'Invalid state abbreviation parameter' });
     }
+    
+    const fullStateName = getStateFullName(req.state.stateCode);
+
+    let response = {
+        state: fullStateName,
+        capital: req.state.capital,
+        nickname: req.state.nickname,
+        population: req.state.population,
+        admitted: req.state.admission.toISOString().split('T')[0] // Formatting the date
+    };
+
+    if (req.state.funfacts && req.state.funfacts.length > 0) {
+        response.funfacts = req.state.funfacts;
+    }
+
+    res.json(response);
 };
 
-// Function to get capital of a state
 const getCapital = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        res.json({ state: dbState.stateCode, capital: dbState.capital });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    if (!req.state) {
+        return res.status(404).json({ error: 'Invalid state abbreviation parameter' });
     }
+    const fullStateName = getStateFullName(req.state.stateCode);  
+    res.json({ state: fullStateName, capital: req.state.capital });
 };
 
-// Function to get nickname of a state
 const getNickname = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        res.json({ state: dbState.stateCode, nickname: dbState.nickname });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    if (!req.state) {
+        return res.status(404).json({ error: 'Invalid state abbreviation parameter' });
     }
+    const fullStateName = getStateFullName(req.state.stateCode);
+    res.json({ state: fullStateName, nickname: req.state.nickname });
 };
 
-// Function to get population of a state
 const getPopulation = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        res.json({ state: dbState.stateCode, population: dbState.population });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    if (!req.state) {
+        return res.status(404).json({ error: 'Invalid state abbreviation parameter' });
     }
+    const fullStateName = getStateFullName(req.state.stateCode);
+    const formattedPopulation = req.state.population.toLocaleString();
+    res.json({ state: fullStateName, population: formattedPopulation });
 };
 
-// Function to get admission date of a state
 const getAdmission = async (req, res) => {
-    try {
-        const { state } = req.params;
-        const dbState = await State.findOne({ stateCode: state });
-
-        if (!dbState) {
-            return res.status(404).json({ error: 'State not found' });
-        }
-
-        res.json({ state: dbState.stateCode, admitted: dbState.admission });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    if (!req.state) {
+        return res.status(404).json({ error: 'Invalid state abbreviation parameter' });
     }
+    
+    const fullStateName = getStateFullName(req.state.stateCode);
+
+    
+    const admittedDate = req.state.admission.toISOString().split('T')[0];
+    res.json({ state: fullStateName, admitted: admittedDate });
 };
 
-// Export all controller functions
+
 module.exports = { 
+    getStateFullName,
     getFunFact,
     addFunFact, 
     updateFunFact, 
